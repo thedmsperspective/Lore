@@ -16,7 +16,7 @@ export function defaultSections() {
     { id: uid(), name: 'Other', icon: '✨', types: [T('Note', [])] },
   ];
 }
-export const newWorld = () => ({ app: 'dmp-lore', v: 1, name: 'My World', sections: defaultSections(), entries: [], events: [], eras: [], calendar: { months: [] }, stamp: 0, settings: {} });
+export const newWorld = () => ({ app: 'dmp-lore', v: 1, name: 'My World', sections: defaultSections(), entries: [], events: [], eras: [], calendar: { months: [] }, maps: [], stamp: 0, settings: {} });
 
 /** Every type with the section it sits in */
 export const allTypes = w => (w.sections || []).flatMap(s => (s.types || []).map(t => ({ ...t, section: s })));
@@ -134,3 +134,13 @@ export function timeline(w) {
 }
 /** A standalone event as players see it */
 export const playerEvent = x => ({ id: x.id, title: x.title || '', date: x.date || null, dateEnd: x.dateEnd || null, text: stripSecrets(x.text) });
+
+/* ---------- maps: a picture with pins that open entries or other maps ---------- */
+// A map: { id, title, img: { id }, revealed, pins: [{ id, x, y (0–1 across and down), label, entry, map, revealed }] }
+/** A revealed map as players see it: only revealed pins, and links only to things they can see */
+export function playerMap(m, visibleEntry, visibleMap) {
+  return {
+    id: m.id, title: m.title || '', img: m.img?.id ? { id: m.img.id } : null,
+    pins: (m.pins || []).filter(p => p.revealed).map(p => ({ id: p.id, x: p.x, y: p.y, label: p.label || '', ...(p.entry && visibleEntry(p.entry) ? { entry: p.entry } : {}), ...(p.map && visibleMap(p.map) ? { map: p.map } : {}) })),
+  };
+}

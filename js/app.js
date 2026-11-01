@@ -31,14 +31,17 @@ async function save() {
 
 /* ---------- whose world is on screen: the DM's own, a player's revealed copy, or the DM previewing that ---------- */
 const reader = () => isPlayer() || ui.preview;
-const fromPub = (meta, e, ev) => ({ name: meta?.name || 'Lore', sections: Object.values(meta?.sections || {}).map(s => ({ ...s, types: Object.values(s.types || {}) })),
+const fromPub = (meta, e, ev, mp) => ({ name: meta?.name || 'Lore', sections: Object.values(meta?.sections || {}).map(s => ({ ...s, types: Object.values(s.types || {}) })),
   eras: Object.values(meta?.eras || {}), calendar: { months: Object.values(meta?.months || {}) },
   entries: Object.values(e || {}).map(x => ({ ...x, facts: Object.values(x.facts || {}), revealed: true })),
-  events: Object.values(ev || {}).map(x => ({ ...x, revealed: true })) });
+  events: Object.values(ev || {}).map(x => ({ ...x, revealed: true })),
+  maps: Object.values(mp || {}).map(m => ({ ...m, pins: Object.values(m.pins || {}).map(p => ({ ...p, revealed: true })), revealed: true })) });
+const pubMaps = () => { const ve = id => W.entries.some(e => e.id === id && e.revealed), vm = id => (W.maps || []).some(m => m.id === id && m.revealed);
+  return Object.fromEntries((W.maps || []).filter(m => m.revealed && m.img?.id).map(m => [m.id, M.playerMap(m, ve, vm)])); };
 const pubMeta = () => ({ name: W.name, sections: M.playerSections(W), eras: (W.eras || []).map(x => ({ id: x.id, name: x.name, abbr: x.abbr || '', ...(x.down ? { down: true } : {}) })), months: (W.calendar?.months || []).map(m => ({ name: m.name, length: m.length })) });
 function view() {
-  if (isPlayer()) return fromPub(P?.meta, P?.e, P?.ev);
-  if (ui.preview) return fromPub(pubMeta(), Object.fromEntries(W.entries.filter(e => e.revealed).map(e => [e.id, M.playerCopy(e)])), Object.fromEntries((W.events || []).filter(x => x.revealed).map(x => [x.id, M.playerEvent(x)])));
+  if (isPlayer()) return fromPub(P?.meta, P?.e, P?.ev, P?.maps);
+  if (ui.preview) return fromPub(pubMeta(), Object.fromEntries(W.entries.filter(e => e.revealed).map(e => [e.id, M.playerCopy(e)])), Object.fromEntries((W.events || []).filter(x => x.revealed).map(x => [x.id, M.playerEvent(x)])), pubMaps());
   return W;
 }
 
@@ -68,7 +71,7 @@ async function sync(interactive) {
   } catch (e) { pill(interactive ? `⚠ ${e.message}` : '● not synced'); if (interactive) toast(e.message); }
   finally { syncing = false; }
 }
-const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? w.sections : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), events: w?.events || [], eras: w?.eras || [], calendar: { months: w?.calendar?.months || [] }, settings: { ...(w?.settings || {}) } });
+const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? w.sections : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), events: w?.events || [], maps: w?.maps || [], eras: w?.eras || [], calendar: { months: w?.calendar?.months || [] }, settings: { ...(w?.settings || {}) } });
 
 // Pictures: shrunk on this device, put in a "Lore pictures" folder in the DM's Drive, viewable by anyone with the link
 async function shrink(file, max) {
@@ -117,18 +120,19 @@ async function publish() {
     const meta = pubMeta();
     const next = Object.fromEntries(W.entries.filter(e => e.revealed).map(e => [e.id, M.playerCopy(e)]));
     const nextEv = Object.fromEntries((W.events || []).filter(x => x.revealed).map(x => [x.id, M.playerEvent(x)]));
-    if (!published) { await T.setLore(t, tid, { meta, e: next, ev: nextEv }); }
+    const nextMp = pubMaps();
+    if (!published) { await T.setLore(t, tid, { meta, e: next, ev: nextEv, maps: nextMp }); }
     else {
       const patch = {};
       if (JSON.stringify(meta) !== published.meta) patch.meta = meta;
-      for (const [k, cur, was] of [['e', next, published.e], ['ev', nextEv, published.ev]]) {
+      for (const [k, cur, was] of [['e', next, published.e], ['ev', nextEv, published.ev], ['maps', nextMp, published.maps]]) {
         for (const [id, x] of Object.entries(cur)) if (was[id] !== JSON.stringify(x)) patch[`${k}/${id}`] = x;
         for (const id of Object.keys(was)) if (!cur[id]) patch[`${k}/${id}`] = null;
       }
       if (Object.keys(patch).length) await T.updateLore(t, tid, patch);
     }
     const strs = o => Object.fromEntries(Object.entries(o).map(([id, x]) => [id, JSON.stringify(x)]));
-    published = { meta: JSON.stringify(meta), e: strs(next), ev: strs(nextEv) };
+    published = { meta: JSON.stringify(meta), e: strs(next), ev: strs(nextEv), maps: strs(nextMp) };
   } catch (e) { console.warn('publish lore', e); }
 }
 let stopWatch = null;
@@ -163,7 +167,7 @@ function render() {
   const app = $('#app');
   $('#back').hidden = ui.view === 'home';
   $('#settingsBtn').hidden = isPlayer();
-  $('#previewBtn').hidden = isPlayer() || !['home', 'section', 'entry', 'timeline'].includes(ui.view);
+  $('#previewBtn').hidden = isPlayer() || !['home', 'section', 'entry', 'timeline', 'maps', 'map'].includes(ui.view);
   $('#previewBtn').setAttribute('aria-pressed', String(ui.preview));
   document.body.classList.toggle('preview', ui.preview);
   if (isPlayer()) {
@@ -173,6 +177,8 @@ function render() {
   $('#crumb').textContent = w.name || '';
   if (ui.view === 'section') return sectionView(app, w);
   if (ui.view === 'timeline') return timelineView(app, w);
+  if (ui.view === 'maps') return mapsView(app, w);
+  if (ui.view === 'map' && (w.maps || []).some(m => m.id === ui.map)) return mapView(app, w);
   if (ui.view === 'entry' && entry(ui.id)) return entryView(app, w);
   if (ui.view === 'edit' && !reader()) return editView(app);
   if (ui.view === 'settings' && !reader()) return settingsView(app);
@@ -188,7 +194,7 @@ function homeView(app, w) {
   const list = ui.q ? M.search(w.entries, ui.q) : null;
   const recent = [...w.entries].sort((a, b) => (b.updated || 0) - (a.updated || 0)).slice(0, 8);
   app.innerHTML = `
-  <div class="card"><div class="row"><h2 class="grow">${esc(w.name || 'Lore')}</h2><button id="tl">🕰 Timeline</button>${reader() ? '' : '<button class="pri" id="newE">+ New entry</button>'}</div>
+  <div class="card"><div class="row"><h2 class="grow">${esc(w.name || 'Lore')}</h2><button id="tl">🕰 Timeline</button><button id="mp">🗺 Maps</button>${reader() ? '' : '<button class="pri" id="newE">+ New entry</button>'}</div>
     ${ui.preview ? '<p class="note">👁 This is what your players see right now.</p>' : ''}
     <input id="q" type="search" placeholder="Search ${esc(w.name || 'the lore')}" value="${esc(ui.q)}" autocomplete="off"></div>
   ${list ? `<div class="card"><h3 style="margin-top:0">${list.length} found</h3><div class="elist">${list.map(e => row(w, e)).join('') || '<p class="mu">Nothing matches.</p>'}</div></div>` : `
@@ -201,8 +207,10 @@ function homeView(app, w) {
   app.querySelectorAll('[data-sec]').forEach(b => { b.onclick = () => go('section', { sec: b.dataset.sec, type: '' }); });
   const n = $('#newE'); if (n) n.onclick = () => go('edit', { id: '' });
   $('#tl').onclick = () => go('timeline');
+  $('#mp').onclick = () => go('maps');
 }
 function bindRows(app) {
+  app.querySelectorAll('[data-map]').forEach(b => { b.onclick = e => { e.preventDefault(); go('map', { map: b.dataset.map, pin: b.dataset.pin || '' }); }; });
   app.querySelectorAll('[data-go]').forEach(b => { b.onclick = e => { e.preventDefault(); go('entry', { id: b.dataset.go }); }; });
   app.querySelectorAll('[data-new]').forEach(b => { b.onclick = e => { e.preventDefault(); go('edit', { id: '', newTitle: b.dataset.new }); }; });
 }
@@ -229,6 +237,7 @@ function entryView(app, w) {
     ${e.summary ? `<p class="lead">${esc(e.summary)}</p>` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(f => `<dt>${esc(f.k)}${f.hidden ? ' <span title="Only you see this">🔒</span>' : ''}</dt><dd>${M.render(f.v, link)}</dd>`).join('')}</dl>` : ''}
     <div class="body">${M.render(e.body, link, { secrets: !reader() }) || (reader() ? '' : '<p class="mu">Nothing written yet. Tap Edit to write about it.</p>')}</div>
+    ${(w.maps || []).filter(m => (m.pins || []).some(p => p.entry === e.id)).length ? `<div class="backs"><h3>On the map</h3><div class="row">${w.maps.filter(m => (m.pins || []).some(p => p.entry === e.id)).map(m => `<a class="lk" data-map="${m.id}" data-pin="${m.pins.find(p => p.entry === e.id).id}">🗺 ${esc(m.title)}</a>`).join('')}</div></div>` : ''}
     ${backs.length ? `<div class="backs"><h3>Mentioned in</h3><div class="row">${backs.map(x => `<a class="lk${!reader() && !x.revealed ? ' hid' : ''}" data-go="${x.id}">${esc(x.title)}</a>`).join('')}</div></div>` : ''}
   </article>
   ${reader() ? '' : `<div class="card"><button class="bad" id="del">Delete this entry</button></div>`}`;
@@ -319,6 +328,104 @@ function pickEntry(done) {
     $('#pq', m).oninput = list; list(); $('#pq', m).focus();
     $('#px', m).onclick = closeModal;
     $('#pnew', m).onclick = () => { const t = $('#pq', m).value.trim(); if (!t) return toast('Type the title first.'); closeModal(); done(t); };
+  });
+}
+
+/* ---------- maps ---------- */
+function mapsView(app, w) {
+  const maps = w.maps || [];
+  app.innerHTML = `<div class="card"><div class="row"><h2 class="grow">🗺 Maps</h2>${reader() ? '' : '<label class="filebtn pri">+ New map<input type="file" id="newMap" accept="image/*" hidden></label>'}</div>
+    <p class="mu small" id="mapMsg">${reader() ? 'The maps your party has.' : 'Upload a map, then pin places on it. Pins can open entries or other maps. Big maps are kept sharp up to 4000 pixels.'}</p></div>
+    <div class="grid">${maps.map(m => `<button class="tile mapt" data-map="${m.id}">${pic(m.img, 600, 'mthumb')}<b>${esc(m.title || 'Untitled map')}</b><span class="mu">${(m.pins || []).length} pin${(m.pins || []).length === 1 ? '' : 's'}${!reader() && !m.revealed ? ' · <span class="tag hid">Hidden</span>' : ''}</span></button>`).join('') || `<p class="mu card">${reader() ? 'No maps yet.' : 'No maps yet.'}</p>`}</div>`;
+  bindRows(app);
+  const f = $('#newMap'); if (f) f.onchange = async ev => {
+    const file = ev.target.files[0]; if (!file) return;
+    const title = prompt('Name of the map', file.name.replace(/\.[^.]+$/, '')); if (title == null) return;
+    $('#mapMsg').textContent = 'Uploading to your Drive…';
+    try { const img = await uploadPicture(file, 4000); const m = { id: M.uid(), title: title.trim() || 'Untitled map', img, pins: [], revealed: false }; W.maps = [...(W.maps || []), m]; await save(); go('map', { map: m.id, pin: '' }); }
+    catch (err) { toast(err.message); render(); }
+  };
+}
+// Pan with a finger or the mouse, pinch or scroll to zoom; pins keep their size
+function mapView(app, w) {
+  const m = w.maps.find(x => x.id === ui.map), dm = !reader();
+  const pinsHtml = () => (m.pins || []).map(p => `<button class="pin${dm && !p.revealed ? ' hid' : ''}${ui.pin === p.id ? ' on' : ''}" data-p="${p.id}" style="left:${p.x * 100}%;top:${p.y * 100}%" title="${esc(p.label)}"><span>${esc(p.label || '•')}</span></button>`).join('');
+  app.innerHTML = `<div class="card"><div class="row"><h2 class="grow">${esc(m.title)}</h2>
+      ${dm ? `<button id="addPin" aria-pressed="${!!ui.adding}">${ui.adding ? 'Tap the map to place it…' : '📍 Add a pin'}</button><button id="mrev" class="${m.revealed ? 'ok' : ''}">${m.revealed ? '👁 Players can see this' : '🔒 Hidden from players'}</button><button id="medit">⋯</button>` : ''}</div></div>
+    <div class="mapwrap" id="mw"><div class="mapinner" id="mi">${pic(m.img, 4000, 'mapimg')}${pinsHtml()}</div>
+      <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit">⤢</button></div></div>
+    <div id="pinbox"></div>`;
+  const wrap = $('#mw'), inner = $('#mi'), img = inner.querySelector('img');
+  const st = { s: 1, x: 0, y: 0 };
+  const apply = () => { inner.style.transform = `translate(${st.x}px,${st.y}px) scale(${st.s})`; inner.style.setProperty('--ps', 1 / st.s); };
+  const fit = () => { const W0 = wrap.clientWidth, H0 = wrap.clientHeight, iw = img.naturalWidth || 1000, ih = img.naturalHeight || 700; inner.style.width = `${iw}px`; inner.style.height = `${ih}px`; st.s = Math.min(W0 / iw, H0 / ih); st.x = (W0 - iw * st.s) / 2; st.y = (H0 - ih * st.s) / 2; apply(); };
+  const zoomAt = (k, cx, cy) => { const ns = Math.max(0.05, Math.min(8, st.s * k)); st.x = cx - (cx - st.x) * (ns / st.s); st.y = cy - (cy - st.y) * (ns / st.s); st.s = ns; apply(); };
+  if (img.complete && img.naturalWidth) fit(); else img.onload = fit;
+  window.onresize = () => { if (ui.view === 'map') fit(); };
+  $('#zin').onclick = () => zoomAt(1.4, wrap.clientWidth / 2, wrap.clientHeight / 2);
+  $('#zout').onclick = () => zoomAt(1 / 1.4, wrap.clientWidth / 2, wrap.clientHeight / 2);
+  $('#zfit').onclick = fit;
+  wrap.onwheel = e => { e.preventDefault(); const r = wrap.getBoundingClientRect(); zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); };
+  const pts = new Map(); let moved = false, last = null;
+  wrap.onpointerdown = e => { if (e.target.closest('.zoom,.pin')) return; wrap.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = false; last = null; };
+  wrap.onpointermove = e => {
+    if (!pts.has(e.pointerId)) return;
+    const p0 = pts.get(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 1) { const dx = e.clientX - p0.x, dy = e.clientY - p0.y; if (Math.abs(dx) + Math.abs(dy) > 2) moved = true; st.x += dx; st.y += dy; apply(); }
+    else if (pts.size === 2) { const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), r = wrap.getBoundingClientRect(); if (last) zoomAt(d / last, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top); last = d; moved = true; }
+  };
+  const up = e => {
+    const was = pts.has(e.pointerId); pts.delete(e.pointerId); if (pts.size < 2) last = null;
+    if (!was || moved || !ui.adding || !dm) return;
+    const r = inner.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    ui.adding = false; pinDialog(m, { id: M.uid(), x, y, label: '', revealed: false }, true);
+  };
+  wrap.onpointerup = up; wrap.onpointercancel = up;
+  // a pin: what it is, and where it leads
+  const showPin = id => {
+    const p = (m.pins || []).find(x => x.id === id); ui.pin = id;
+    inner.querySelectorAll('.pin').forEach(b => b.classList.toggle('on', b.dataset.p === id));
+    const e = p?.entry && w.entries.find(x => x.id === p.entry), mm = p?.map && w.maps.find(x => x.id === p.map);
+    $('#pinbox').innerHTML = p ? `<div class="card"><div class="row"><b class="grow">📍 ${esc(p.label || (e?.title) || (mm?.title) || 'A pin')}</b>${dm && !p.revealed ? '<span class="tag hid">Hidden</span>' : ''}</div>
+      ${e ? `<p>${esc(e.summary || '')}</p>` : ''}
+      <div class="row">${e ? `<button class="pri" data-go="${e.id}">Open ${esc(e.title)}</button>` : ''}${mm ? `<button class="pri" data-map="${mm.id}">🗺 Open ${esc(mm.title)}</button>` : ''}${dm ? '<button id="pedit">Edit pin</button>' : ''}</div></div>` : '';
+    bindRows($('#pinbox'));
+    const pe = $('#pedit'); if (pe) pe.onclick = () => pinDialog(m, p, false);
+  };
+  inner.querySelectorAll('.pin').forEach(b => { b.onclick = e => { e.stopPropagation(); showPin(b.dataset.p); }; });
+  if (ui.pin) showPin(ui.pin);
+  if (!dm) return;
+  $('#addPin').onclick = () => { ui.adding = !ui.adding; $('#addPin').textContent = ui.adding ? 'Tap the map to place it…' : '📍 Add a pin'; $('#addPin').setAttribute('aria-pressed', String(ui.adding)); };
+  $('#mrev').onclick = () => { const x = W.maps.find(y => y.id === m.id); x.revealed = !x.revealed; save(); render(); toast(x.revealed ? 'Players can see this map (and its revealed pins).' : 'Map hidden from players.'); };
+  $('#medit').onclick = () => modal(`<h2>${esc(m.title)}</h2><label>Name</label><input id="mn" value="${esc(m.title)}">
+    <div class="row" style="margin-top:12px"><button class="pri" id="ms">Save</button><button id="mc">Cancel</button><span class="grow"></span><button class="bad" id="md">Delete map</button></div>`, md => {
+    $('#mc', md).onclick = closeModal;
+    $('#ms', md).onclick = () => { const x = W.maps.find(y => y.id === m.id); x.title = $('#mn', md).value.trim() || x.title; save(); closeModal(); render(); };
+    $('#md', md).onclick = () => { if (!confirm(`Delete ${m.title} and its pins?`)) return; const x = W.maps.find(y => y.id === m.id); W.maps = W.maps.filter(y => y.id !== m.id); for (const o of W.maps) o.pins = (o.pins || []).filter(p => p.map !== m.id); save(); trashPicture(x.img); closeModal(); go('maps'); };
+  });
+}
+function pinDialog(m, p, isNew) {
+  const e0 = p.entry ? W.entries.find(x => x.id === p.entry) : null;
+  const others = (W.maps || []).filter(x => x.id !== m.id);
+  modal(`<h2>${isNew ? 'New pin' : 'Pin'}</h2><label>Label</label><input id="pl" value="${esc(p.label)}" placeholder="Leave empty to use the entry's title">
+    <label>Opens this entry</label><div class="row"><span class="grow" id="pe">${e0 ? esc(e0.title) : '<span class="mu">None</span>'}</span><button class="sm" id="pep">Choose</button>${e0 ? '<button class="sm" id="pex">Clear</button>' : ''}</div>
+    ${others.length ? `<label>Or opens this map</label><select id="pm"><option value="">None</option>${others.map(x => `<option value="${x.id}" ${p.map === x.id ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select>` : ''}
+    <label class="chk"><input type="checkbox" id="pr" ${p.revealed ? 'checked' : ''}> Players can see this pin</label>
+    <div class="row" style="margin-top:12px"><button class="pri" id="ps">Save</button><button id="pc">Cancel</button><span class="grow"></span>${isNew ? '' : '<button class="bad" id="pd">Remove pin</button>'}</div>`, md => {
+    let entry = p.entry || '';
+    $('#pc', md).onclick = closeModal;
+    $('#pep', md).onclick = () => { const keep = { label: $('#pl', md).value, map: $('#pm', md)?.value || '', rev: $('#pr', md).checked }; pickEntry(title => { const e = W.entries.find(x => x.title.toLowerCase() === title.toLowerCase()); pinDialog(m, { ...p, label: keep.label, map: keep.map, revealed: keep.rev, entry: e?.id || '' }, isNew); if (!e) toast('Write that entry first, then pin it.'); }); };
+    const cx = $('#pex', md); if (cx) cx.onclick = () => pinDialog(m, { ...p, label: $('#pl', md).value, entry: '' }, isNew);
+    $('#ps', md).onclick = () => {
+      const x = W.maps.find(y => y.id === m.id);
+      const pin = { ...p, label: $('#pl', md).value.trim(), entry, map: $('#pm', md)?.value || '', revealed: $('#pr', md).checked };
+      if (!pin.label && !pin.entry && !pin.map) return toast('Give the pin a label, or choose what it opens.');
+      if (!pin.label) pin.label = W.entries.find(y => y.id === pin.entry)?.title || W.maps.find(y => y.id === pin.map)?.title || '';
+      x.pins = [...(x.pins || []).filter(y => y.id !== pin.id), pin];
+      save(); closeModal(); ui.pin = pin.id; render();
+    };
+    const d = $('#pd', md); if (d) d.onclick = () => { const x = W.maps.find(y => y.id === m.id); x.pins = x.pins.filter(y => y.id !== p.id); ui.pin = ''; save(); closeModal(); render(); };
   });
 }
 
@@ -440,6 +547,7 @@ function settingsView(app) {
 $('#back').onclick = () => {
   if (ui.view === 'entry') { const e = entry(ui.id); const s = e && M.sectionOf(view(), e); return s ? go('section', { sec: s.id, type: '' }) : go('home'); }
   if (ui.view === 'edit' && ui.id) return go('entry', { id: ui.id });
+  if (ui.view === 'map') { const up = (view().maps || []).find(m => (m.pins || []).some(p => p.map === ui.map)); return up ? go('map', { map: up.id, pin: '' }) : go('maps'); }
   go('home');
 };
 $('#settingsBtn').onclick = () => { ui.preview = false; go('settings'); };
