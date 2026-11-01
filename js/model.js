@@ -16,7 +16,7 @@ export function defaultSections() {
     { id: uid(), name: 'Other', icon: '✨', types: [T('Note', [])] },
   ];
 }
-export const newWorld = () => ({ app: 'dmp-lore', v: 1, name: 'My World', sections: defaultSections(), entries: [], stamp: 0, settings: {} });
+export const newWorld = () => ({ app: 'dmp-lore', v: 1, name: 'My World', sections: defaultSections(), entries: [], events: [], eras: [], calendar: { months: [] }, stamp: 0, settings: {} });
 
 /** Every type with the section it sits in */
 export const allTypes = w => (w.sections || []).flatMap(s => (s.types || []).map(t => ({ ...t, section: s })));
@@ -84,6 +84,7 @@ export function playerCopy(e) {
     id: e.id, type: e.type || '', title: e.title || '', summary: e.summary || '',
     body: stripSecrets(e.body), img: e.img?.id ? { id: e.img.id } : null,
     facts: (e.facts || []).filter(f => !f.hidden && String(f.v || '').trim()).map(f => ({ k: f.k, v: stripSecrets(f.v) })),
+    ...(hasDate(e.date) ? { date: e.date } : {}), ...(hasDate(e.dateEnd) ? { dateEnd: e.dateEnd } : {}),
     updated: e.updated || 0,
   };
 }
@@ -101,3 +102,35 @@ export function search(entries, q) {
     + ((e.facts || []).some(f => String(f.v || '').toLowerCase().includes(q)) ? 1 : 0) + (String(e.body || '').toLowerCase().includes(q) ? 1 : 0);
   return entries.map(e => ({ e, s: score(e) })).filter(x => x.s).sort((a, b) => b.s - a.s || a.e.title.localeCompare(b.e.title)).map(x => x.e);
 }
+
+/* ---------- the Timeline: eras the DM names, and dates within them ---------- */
+// A date: { era: eraId, year, month (0-based, optional), day (optional), approx }. Eras are listed oldest first; an era
+// that "counts down" (like years before a great event) puts bigger years earlier.
+export const hasDate = d => !!(d && d.era && Number.isFinite(Number(d.year)) && String(d.year) !== '');
+export function dateKey(w, d) {
+  if (!hasDate(d)) return -Infinity;
+  const eras = w.eras || [], i = eras.findIndex(x => x.id === d.era), era = eras[i];
+  const y = Number(d.year) * (era?.down ? -1 : 1);
+  const m = d.month === '' || d.month == null ? -1 : Number(d.month), day = Number(d.day) || 0;
+  return (i < 0 ? 999 : i) * 1e12 + (y + 5e8) * 1000 + (m + 1) * 40 + day;
+}
+export function dateText(w, d) {
+  if (!hasDate(d)) return '';
+  const era = (w.eras || []).find(x => x.id === d.era);
+  const months = w.calendar?.months || [];
+  const mi = d.month === '' || d.month == null ? -1 : Number(d.month);
+  const mname = mi >= 0 ? (months[mi]?.name || `Month ${mi + 1}`) : '';
+  const yr = era?.abbr ? `${d.year} ${era.abbr}` : `Year ${d.year}${era ? `, ${era.name}` : ''}`;
+  const day = mname && Number(d.day) ? `${Number(d.day)} ` : '';
+  return `${d.approx ? 'Around ' : ''}${mname ? `${day}${mname}, ` : ''}${yr}`;
+}
+/** Everything on the Timeline, in order: dated entries and standalone events. */
+export function timeline(w) {
+  const items = [
+    ...(w.entries || []).filter(e => hasDate(e.date)).map(e => ({ kind: 'entry', id: e.id, title: e.title, date: e.date, end: e.dateEnd, text: e.summary || '', revealed: e.revealed, type: e.type, img: e.img })),
+    ...(w.events || []).filter(x => hasDate(x.date)).map(x => ({ kind: 'event', id: x.id, title: x.title, date: x.date, end: x.dateEnd, text: x.text || '', revealed: x.revealed })),
+  ];
+  return items.sort((a, b) => dateKey(w, a.date) - dateKey(w, b.date) || a.title.localeCompare(b.title));
+}
+/** A standalone event as players see it */
+export const playerEvent = x => ({ id: x.id, title: x.title || '', date: x.date || null, dateEnd: x.dateEnd || null, text: stripSecrets(x.text) });

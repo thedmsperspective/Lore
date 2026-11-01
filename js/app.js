@@ -31,11 +31,14 @@ async function save() {
 
 /* ---------- whose world is on screen: the DM's own, a player's revealed copy, or the DM previewing that ---------- */
 const reader = () => isPlayer() || ui.preview;
-const fromPub = (meta, e) => ({ name: meta?.name || 'Lore', sections: (meta?.sections || []).map(s => ({ ...s, types: Object.values(s.types || {}) })),
-  entries: Object.values(e || {}).map(x => ({ ...x, facts: Object.values(x.facts || {}), revealed: true })) });
+const fromPub = (meta, e, ev) => ({ name: meta?.name || 'Lore', sections: Object.values(meta?.sections || {}).map(s => ({ ...s, types: Object.values(s.types || {}) })),
+  eras: Object.values(meta?.eras || {}), calendar: { months: Object.values(meta?.months || {}) },
+  entries: Object.values(e || {}).map(x => ({ ...x, facts: Object.values(x.facts || {}), revealed: true })),
+  events: Object.values(ev || {}).map(x => ({ ...x, revealed: true })) });
+const pubMeta = () => ({ name: W.name, sections: M.playerSections(W), eras: (W.eras || []).map(x => ({ id: x.id, name: x.name, abbr: x.abbr || '', ...(x.down ? { down: true } : {}) })), months: (W.calendar?.months || []).map(m => ({ name: m.name, length: m.length })) });
 function view() {
-  if (isPlayer()) return fromPub(P?.meta, P?.e);
-  if (ui.preview) return fromPub({ name: W.name, sections: M.playerSections(W) }, Object.fromEntries(W.entries.filter(e => e.revealed).map(e => [e.id, M.playerCopy(e)])));
+  if (isPlayer()) return fromPub(P?.meta, P?.e, P?.ev);
+  if (ui.preview) return fromPub(pubMeta(), Object.fromEntries(W.entries.filter(e => e.revealed).map(e => [e.id, M.playerCopy(e)])), Object.fromEntries((W.events || []).filter(x => x.revealed).map(x => [x.id, M.playerEvent(x)])));
   return W;
 }
 
@@ -65,7 +68,7 @@ async function sync(interactive) {
   } catch (e) { pill(interactive ? `⚠ ${e.message}` : '● not synced'); if (interactive) toast(e.message); }
   finally { syncing = false; }
 }
-const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? w.sections : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), settings: { ...(w?.settings || {}) } });
+const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? w.sections : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), events: w?.events || [], eras: w?.eras || [], calendar: { months: w?.calendar?.months || [] }, settings: { ...(w?.settings || {}) } });
 
 // Pictures: shrunk on this device, put in a "Lore pictures" folder in the DM's Drive, viewable by anyone with the link
 async function shrink(file, max) {
@@ -111,17 +114,21 @@ async function publish() {
   if (!amDm()) return;
   try {
     const T = await core.tables(), tid = core.currentTable().id, t = await tablePass();
-    const meta = { name: W.name, sections: M.playerSections(W) };
+    const meta = pubMeta();
     const next = Object.fromEntries(W.entries.filter(e => e.revealed).map(e => [e.id, M.playerCopy(e)]));
-    if (!published) { await T.setLore(t, tid, { meta, e: next }); }
+    const nextEv = Object.fromEntries((W.events || []).filter(x => x.revealed).map(x => [x.id, M.playerEvent(x)]));
+    if (!published) { await T.setLore(t, tid, { meta, e: next, ev: nextEv }); }
     else {
       const patch = {};
       if (JSON.stringify(meta) !== published.meta) patch.meta = meta;
-      for (const [id, x] of Object.entries(next)) if (published.e[id] !== JSON.stringify(x)) patch[`e/${id}`] = x;
-      for (const id of Object.keys(published.e)) if (!next[id]) patch[`e/${id}`] = null;
+      for (const [k, cur, was] of [['e', next, published.e], ['ev', nextEv, published.ev]]) {
+        for (const [id, x] of Object.entries(cur)) if (was[id] !== JSON.stringify(x)) patch[`${k}/${id}`] = x;
+        for (const id of Object.keys(was)) if (!cur[id]) patch[`${k}/${id}`] = null;
+      }
       if (Object.keys(patch).length) await T.updateLore(t, tid, patch);
     }
-    published = { meta: JSON.stringify(meta), e: Object.fromEntries(Object.entries(next).map(([id, x]) => [id, JSON.stringify(x)])) };
+    const strs = o => Object.fromEntries(Object.entries(o).map(([id, x]) => [id, JSON.stringify(x)]));
+    published = { meta: JSON.stringify(meta), e: strs(next), ev: strs(nextEv) };
   } catch (e) { console.warn('publish lore', e); }
 }
 let stopWatch = null;
@@ -156,7 +163,7 @@ function render() {
   const app = $('#app');
   $('#back').hidden = ui.view === 'home';
   $('#settingsBtn').hidden = isPlayer();
-  $('#previewBtn').hidden = isPlayer() || !['home', 'section', 'entry'].includes(ui.view);
+  $('#previewBtn').hidden = isPlayer() || !['home', 'section', 'entry', 'timeline'].includes(ui.view);
   $('#previewBtn').setAttribute('aria-pressed', String(ui.preview));
   document.body.classList.toggle('preview', ui.preview);
   if (isPlayer()) {
@@ -165,6 +172,7 @@ function render() {
   const w = view();
   $('#crumb').textContent = w.name || '';
   if (ui.view === 'section') return sectionView(app, w);
+  if (ui.view === 'timeline') return timelineView(app, w);
   if (ui.view === 'entry' && entry(ui.id)) return entryView(app, w);
   if (ui.view === 'edit' && !reader()) return editView(app);
   if (ui.view === 'settings' && !reader()) return settingsView(app);
@@ -180,7 +188,7 @@ function homeView(app, w) {
   const list = ui.q ? M.search(w.entries, ui.q) : null;
   const recent = [...w.entries].sort((a, b) => (b.updated || 0) - (a.updated || 0)).slice(0, 8);
   app.innerHTML = `
-  <div class="card"><div class="row"><h2 class="grow">${esc(w.name || 'Lore')}</h2>${reader() ? '' : '<button class="pri" id="newE">+ New entry</button>'}</div>
+  <div class="card"><div class="row"><h2 class="grow">${esc(w.name || 'Lore')}</h2><button id="tl">🕰 Timeline</button>${reader() ? '' : '<button class="pri" id="newE">+ New entry</button>'}</div>
     ${ui.preview ? '<p class="note">👁 This is what your players see right now.</p>' : ''}
     <input id="q" type="search" placeholder="Search ${esc(w.name || 'the lore')}" value="${esc(ui.q)}" autocomplete="off"></div>
   ${list ? `<div class="card"><h3 style="margin-top:0">${list.length} found</h3><div class="elist">${list.map(e => row(w, e)).join('') || '<p class="mu">Nothing matches.</p>'}</div></div>` : `
@@ -192,6 +200,7 @@ function homeView(app, w) {
   bindRows(app);
   app.querySelectorAll('[data-sec]').forEach(b => { b.onclick = () => go('section', { sec: b.dataset.sec, type: '' }); });
   const n = $('#newE'); if (n) n.onclick = () => go('edit', { id: '' });
+  $('#tl').onclick = () => go('timeline');
 }
 function bindRows(app) {
   app.querySelectorAll('[data-go]').forEach(b => { b.onclick = e => { e.preventDefault(); go('entry', { id: b.dataset.go }); }; });
@@ -215,7 +224,7 @@ function entryView(app, w) {
   app.innerHTML = `
   <article class="card entry">
     ${e.img?.id ? `<div class="hero">${pic(e.img, 1600)}</div>` : ''}
-    <div class="row"><div class="grow"><h2>${esc(e.title)}</h2><span class="mu">${esc(t?.name || 'Entry')}${t ? ` · ${esc(t.section.name)}` : ''}</span></div>
+    <div class="row"><div class="grow"><h2>${esc(e.title)}</h2><span class="mu">${esc(t?.name || 'Entry')}${t ? ` · ${esc(t.section.name)}` : ''}</span>${M.hasDate(e.date) ? `<div class="when">🕰 ${esc(M.dateText(w, e.date))}${M.hasDate(e.dateEnd) ? ` – ${esc(M.dateText(w, e.dateEnd))}` : ''}</div>` : ''}</div>
       ${reader() ? '' : `<button id="reveal" class="${e.revealed ? 'ok' : ''}" aria-pressed="${!!e.revealed}">${e.revealed ? '👁 Players can see this' : '🔒 Hidden from players'}</button><button id="edit">Edit</button>`}</div>
     ${e.summary ? `<p class="lead">${esc(e.summary)}</p>` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(f => `<dt>${esc(f.k)}${f.hidden ? ' <span title="Only you see this">🔒</span>' : ''}</dt><dd>${M.render(f.v, link)}</dd>`).join('')}</dl>` : ''}
@@ -246,6 +255,8 @@ function editView(app) {
       <label>Title</label><input id="et" value="${esc(e.title)}" placeholder="What is it called?">
       <label>Type</label><select id="ety">${W.sections.map(s => `<optgroup label="${esc(s.name)}">${(s.types || []).map(x => `<option value="${x.id}" ${x.id === e.type ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`).join('')}</select>
       <label>Picture</label><div class="row">${e.img?.id ? pic(e.img, 400, 'thumb big') : ''}<label class="filebtn">${e.img?.id ? 'Change picture' : 'Add a picture'}<input type="file" id="ei" accept="image/*" hidden></label>${e.img?.id ? '<button class="sm" id="erm">Remove</button>' : ''}<span class="mu small" id="eis"></span></div>
+      <label>When (puts it on the Timeline; leave the era empty for no date)</label>${dateFields('ed', e.date)}
+      <details ${M.hasDate(e.dateEnd) ? 'open' : ''}><summary class="mu small">It lasted a while: add an end date</summary>${dateFields('ee', e.dateEnd)}</details>
       <label>Summary (a line or two)</label><textarea id="es" rows="2" placeholder="The one thing everyone knows about it">${esc(e.summary)}</textarea>
       <label>Facts</label><div class="factedit">${facts.map((f, i) => `<input class="fk" data-fk="${i}" value="${esc(f.k)}" ${fields.includes(f.k) ? 'readonly' : ''}><input data-fv="${i}" value="${esc(f.v)}"><label class="lock" title="Secret: only you see this fact"><input type="checkbox" data-fh="${i}" ${f.hidden ? 'checked' : ''}> 🔒</label>`).join('')}</div>
       <button class="sm" id="addf">+ Add a fact</button>
@@ -260,6 +271,7 @@ function editView(app) {
       app.querySelectorAll('[data-fv]').forEach(i => { e.facts[i.dataset.fv].v = i.value; });
       app.querySelectorAll('[data-fk]').forEach(i => { e.facts[i.dataset.fk].k = i.value.trim(); });
       app.querySelectorAll('[data-fh]').forEach(i => { e.facts[i.dataset.fh].hidden = i.checked; });
+      e.date = readDate('ed', app); e.dateEnd = readDate('ee', app);
     };
     $('#ety').onchange = () => { keep(); e.type = $('#ety').value; draw(); };
     $('#addf').onclick = () => { keep(); const k = prompt('Name of the fact (for example: Founded)'); if (k?.trim()) e.facts.push({ k: k.trim(), v: '', hidden: false }); draw(); };
@@ -310,6 +322,64 @@ function pickEntry(done) {
   });
 }
 
+/* ---------- the Timeline ---------- */
+// The date boxes: an era, a year, and (if known) a month and day; "around" for when nobody's sure
+function dateFields(p, d) {
+  d = d || {};
+  if (!(W.eras || []).length) return `<p class="mu small">Add an era first (in ⚙, under Timeline) to give things dates.</p>`;
+  const months = W.calendar?.months || [];
+  return `<div class="row datef"><select data-d="${p}-era" style="width:auto"><option value="">No date</option>${W.eras.map(x => `<option value="${x.id}" ${d.era === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+    <input data-d="${p}-year" class="n" inputmode="numeric" placeholder="Year" value="${esc(d.year ?? '')}">
+    ${months.length ? `<select data-d="${p}-month" style="width:auto"><option value="">Month</option>${months.map((m, i) => `<option value="${i}" ${String(d.month) === String(i) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>`
+      : `<input data-d="${p}-month" class="n" inputmode="numeric" placeholder="Month #" value="${d.month === '' || d.month == null ? '' : Number(d.month) + 1}">`}
+    <input data-d="${p}-day" class="n" inputmode="numeric" placeholder="Day" value="${esc(d.day ?? '')}">
+    <label class="chk" style="margin:0"><input type="checkbox" data-d="${p}-approx" ${d.approx ? 'checked' : ''}> Around</label></div>`;
+}
+function readDate(p, root) {
+  const v = k => root.querySelector(`[data-d="${p}-${k}"]`);
+  if (!v('era') || !v('era').value || v('year').value.trim() === '') return null;
+  const months = W.calendar?.months || [];
+  let month = v('month').value.trim(); month = month === '' ? '' : months.length ? Number(month) : Math.max(0, Number(month) - 1);
+  return { era: v('era').value, year: Number(v('year').value) || 0, month, day: month === '' ? '' : (Number(v('day').value) || ''), approx: v('approx').checked || undefined };
+}
+function timelineView(app, w) {
+  const items = M.timeline(w), link = linker(w);
+  const eraOf = it => (w.eras || []).find(x => x.id === it.date.era);
+  let last = null;
+  app.innerHTML = `<div class="card"><div class="row"><h2 class="grow">🕰 Timeline</h2>${reader() ? '' : '<button class="pri" id="addEv">+ Add an event</button>'}</div>
+    <p class="mu small">${reader() ? 'What you know of the world\'s history.' : 'Every entry with a date shows here, with the events you add. Hidden ones stay hidden from your players.'}${!reader() && !(W.eras || []).length ? ' Start by naming an era in ⚙.' : ''}</p></div>
+  <div class="card"><ol class="tline">${items.map(it => { const era = eraOf(it), head = era && era !== last ? `<li class="era"><b>${esc(era.name)}</b>${era.abbr ? ` <span class="mu">(${esc(era.abbr)})</span>` : ''}</li>` : ''; last = era;
+    return `${head}<li class="ev${!reader() && !it.revealed ? ' hid' : ''}" ${it.kind === 'entry' ? `data-go="${it.id}"` : `data-ev="${it.id}"`}><span class="d">${esc(M.dateText(w, it.date))}${M.hasDate(it.end) ? ` – ${esc(M.dateText(w, it.end))}` : ''}</span>
+      <span class="t"><b>${esc(it.title)}</b>${it.kind === 'entry' ? ` <span class="mu small">${esc(typeName(w, it.type))}</span>` : ''}${!reader() && !it.revealed ? ' <span class="tag hid">Hidden</span>' : ''}</span>
+      ${it.text ? `<span class="x">${it.kind === 'event' ? M.render(it.text, link, { secrets: !reader() }) : esc(it.text)}</span>` : ''}</li>`; }).join('') || `<li class="mu">${reader() ? 'Nothing here yet.' : 'Nothing dated yet. Give an entry a date, or add an event.'}</li>`}</ol></div>`;
+  app.querySelectorAll('[data-go]').forEach(b => { b.onclick = e => { e.preventDefault(); e.stopPropagation(); go('entry', { id: b.dataset.go }); }; });
+  app.querySelectorAll('[data-new]').forEach(b => { b.onclick = e => { e.stopPropagation(); go('edit', { id: '', newTitle: b.dataset.new }); }; });
+  if (reader()) return;
+  app.querySelectorAll('li[data-ev]').forEach(li => { li.onclick = e => { if (e.target.closest('a')) return; eventDialog(li.dataset.ev); }; });
+  const a = $('#addEv'); if (a) a.onclick = () => eventDialog('');
+}
+function eventDialog(id) {
+  const was = (W.events || []).find(x => x.id === id);
+  const x = was ? JSON.parse(JSON.stringify(was)) : { id: M.uid(), title: '', date: null, dateEnd: null, text: '', revealed: false };
+  modal(`<h2>${was ? 'Event' : 'New event'}</h2><label>What happened</label><input id="vt" value="${esc(x.title)}" placeholder="The harbor burns">
+    <label>When</label>${dateFields('vd', x.date)}<details ${M.hasDate(x.dateEnd) ? 'open' : ''}><summary class="mu small">It lasted a while: add an end date</summary>${dateFields('ve', x.dateEnd)}</details>
+    <label>More about it (optional; [[links]] and [secret] parts work here too)</label><textarea id="vx" rows="5">${esc(x.text)}</textarea>
+    <label class="chk"><input type="checkbox" id="vr" ${x.revealed ? 'checked' : ''}> Players can see this event</label>
+    <div class="row" style="margin-top:12px"><button class="pri" id="vs">Save</button><button id="vc">Cancel</button><span class="grow"></span>${was ? '<button class="bad" id="vdel">Delete</button>' : ''}</div>`, m => {
+    $('#vc', m).onclick = closeModal;
+    $('#vs', m).onclick = () => {
+      x.title = $('#vt', m).value.trim(); if (!x.title) return toast('Say what happened.');
+      x.date = readDate('vd', m); if (!x.date) return toast('Give it a date (an era and a year).');
+      x.dateEnd = readDate('ve', m); x.text = $('#vx', m).value; x.revealed = $('#vr', m).checked;
+      W.events = W.events || [];
+      if (was) W.events[W.events.indexOf(was)] = x; else W.events.push(x);
+      save(); closeModal(); render();
+    };
+    const d = $('#vdel', m); if (d) d.onclick = () => { if (!confirm('Delete this event?')) return; W.events = W.events.filter(y => y.id !== id); save(); closeModal(); render(); };
+  });
+}
+
+const eraUsed = id => [...W.entries.flatMap(e => [e.date, e.dateEnd]), ...(W.events || []).flatMap(x => [x.date, x.dateEnd])].some(d => d?.era === id);
 function settingsView(app) {
   const used = id => W.entries.filter(e => e.type === id).length;
   app.innerHTML = `<div class="card"><h2>Your world</h2><label>Name</label><input id="wn" value="${esc(W.name)}"></div>
@@ -318,6 +388,14 @@ function settingsView(app) {
         ${s.types.map((t, ti) => `<div class="typeedit"><input data-si="${si}" data-ti="${ti}" data-k="tname" value="${esc(t.name)}" aria-label="Type name"><input data-si="${si}" data-ti="${ti}" data-k="fields" value="${esc((t.fields || []).join(', '))}" placeholder="Facts, with commas" aria-label="Facts"><span class="mu small" title="Entries of this type">${used(t.id) || ''}</span>${used(t.id) ? '<span></span>' : `<button class="sm" data-deltype="${si}.${ti}" aria-label="Remove type">✕</button>`}</div>`).join('')}
         <button class="sm" data-addtype="${si}">+ Add a type</button></div>`).join('')}
       <button id="addsec">+ Add a section</button></div>
+    <div class="card"><h2>Timeline</h2><p class="mu small">Name your world's eras, oldest first. Years count up within an era, unless you tick "counts down" (like years before a great event).</p>
+      ${(W.eras || []).map((x, i) => `<div class="eraedit"><input data-era="${i}" data-k="name" value="${esc(x.name)}" placeholder="Era name" aria-label="Era name"><input data-era="${i}" data-k="abbr" value="${esc(x.abbr || '')}" placeholder="Short" aria-label="Short name" class="n">
+        <label class="chk" style="margin:0"><input type="checkbox" data-era="${i}" data-k="down" ${x.down ? 'checked' : ''}> counts down</label>
+        <button class="sm" data-eramove="${i}" ${i ? '' : 'disabled'} aria-label="Move up">↑</button>${eraUsed(x.id) ? '<span></span>' : `<button class="sm" data-eradel="${i}" aria-label="Remove">✕</button>`}</div>`).join('') || '<p class="mu">No eras yet.</p>'}
+      <button id="addEra">+ Add an era</button>
+      <h3>Months</h3><p class="mu small">For exact dates. One per line: the name, then the number of days.</p>
+      <textarea id="months" rows="5" placeholder="First Month, 30">${esc((W.calendar?.months || []).map(m => `${m.name}, ${m.length}`).join('\n'))}</textarea>
+      <div class="row"><button class="sm" id="snCal">Use my Session Notes calendar</button></div></div>
     <div class="card"><h2>Google Drive</h2><div class="row"><button id="syncNow" class="pri">Sync now</button><span class="mu">${esc(syncMsg)}</span></div>
       <p class="mu small">Your world is kept privately in your Google Drive. Pictures go in a "Lore pictures" folder there, viewable by link, so your players see them without any extra steps.</p></div>
     <div class="card"><h2>Backup</h2><div class="row"><button id="exp">Save a backup file</button><label class="filebtn">Load a backup<input type="file" id="imp" accept=".json" hidden></label></div></div>`;
@@ -336,6 +414,24 @@ function settingsView(app) {
   app.querySelectorAll('[data-delsec]').forEach(b => { b.onclick = () => { if (!confirm('Remove this section and its types?')) return; W.sections.splice(Number(b.dataset.delsec), 1); save(); render(); }; });
   $('#addsec').onclick = () => { const n = prompt('Name of the new section'); if (!n?.trim()) return; W.sections.push({ id: M.uid(), name: n.trim(), icon: '✨', types: [{ id: M.uid(), name: n.trim(), fields: [] }] }); save(); render(); };
   $('#syncNow').onclick = () => sync(true).then(render);
+  app.querySelectorAll('[data-era]').forEach(i => { i.onchange = () => { const x = W.eras[i.dataset.era]; if (i.dataset.k === 'down') x.down = i.checked || undefined; else x[i.dataset.k] = i.value.trim(); save(); }; });
+  app.querySelectorAll('[data-eramove]').forEach(b => { b.onclick = () => { const i = Number(b.dataset.eramove); [W.eras[i - 1], W.eras[i]] = [W.eras[i], W.eras[i - 1]]; save(); render(); }; });
+  app.querySelectorAll('[data-eradel]').forEach(b => { b.onclick = () => { W.eras.splice(Number(b.dataset.eradel), 1); save(); render(); }; });
+  $('#addEra').onclick = () => { const n = prompt('Name of the era (for example: The Old Kingdom)'); if (!n?.trim()) return; W.eras = [...(W.eras || []), { id: M.uid(), name: n.trim(), abbr: '' }]; save(); render(); };
+  $('#months').onchange = e => {
+    const months = e.target.value.split('\n').map(l => l.match(/^(.*?)[,\s]+(\d+)\s*$/)).filter(Boolean).map(m => ({ name: m[1].trim(), length: Number(m[2]) }));
+    W.calendar = { months }; save(); toast(months.length ? `${months.length} months saved.` : 'Months cleared.');
+  };
+  $('#snCal').onclick = async () => {
+    try {
+      const t = await getToken(true), sn = await core.readAppdata(t, 'session-notes-sync.json');
+      const camps = (sn?.campaigns || []).filter(c => !c.deleted && c.calendar?.months?.length);
+      if (!camps.length) return toast("Couldn't find a calendar in Session Notes.");
+      const cur = core.currentCampaign?.()?.id, c = camps.find(x => x.id === cur) || camps[0];
+      W.calendar = { months: c.calendar.months.map(m => ({ name: m.name, length: m.length })) }; save(); render();
+      toast(`Using the months from ${c.name || 'your campaign'}'s calendar.`);
+    } catch (err) { toast(err.message); }
+  };
   $('#exp').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(W, null, 1)], { type: 'application/json' })); a.download = `lore-${(W.name || 'world').replace(/[^\w-]+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.json`; a.click(); };
   $('#imp').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const o = JSON.parse(await f.text()); if (o?.app !== 'dmp-lore') throw new Error("That isn't a Lore backup."); if (!confirm(`Replace everything here with ${o.name || 'the backup'}?`)) return; W = normalize(o); await save(); go('home'); } catch (err) { toast(err.message); } };
 }
