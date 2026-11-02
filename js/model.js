@@ -11,7 +11,7 @@ export const TYPE_ICONS = {
   'Region or Country': '🏰', Settlement: '🏘️', 'Landmark or Building': '🏛️', Geography: '⛰️', Plane: '🌀',
   Character: '🧑', 'People or Species': '🧝', Culture: '🎭', Language: '🗣️',
   Deity: '☀️', Religion: '🕯️', 'Faction or Organization': '🛡️', Military: '⚔️', 'Title or Rank': '👑',
-  'Item or Artifact': '💎', Material: '🪨', 'Document or Text': '📜', 'Technology or Magic': '🔮',
+  'Item or Artifact': '💎', Material: '🪨', 'Document or Text': '📖', 'Technology or Magic': '🔮',
   'Event or Conflict': '🔥', 'Myth or Legend': '🐉', Tradition: '🎉', Note: '📝',
 };
 /** The symbol for an entry: its type's, else its section's */

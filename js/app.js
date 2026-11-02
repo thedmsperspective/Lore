@@ -71,7 +71,7 @@ async function sync(interactive) {
   } catch (e) { pill(interactive ? `⚠ ${e.message}` : '● not synced'); if (interactive) toast(e.message); }
   finally { syncing = false; }
 }
-const withIcons = secs => secs.map(s => ({ ...s, types: (s.types || []).map(t => (t.icon == null && M.TYPE_ICONS[t.name] ? { ...t, icon: M.TYPE_ICONS[t.name] } : t)) }));
+const withIcons = secs => secs.map(s => ({ ...s, types: (s.types || []).map(t => ((t.icon == null || (t.name === 'Document or Text' && t.icon === '📜')) && M.TYPE_ICONS[t.name] ? { ...t, icon: M.TYPE_ICONS[t.name] } : t)) }));
 const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? withIcons(w.sections) : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), events: w?.events || [], maps: w?.maps || [], eras: w?.eras || [], calendar: { months: w?.calendar?.months || [] }, settings: { ...(w?.settings || {}) } });
 
 // Pictures: shrunk on this device, put in a "Lore pictures" folder in the DM's Drive, viewable by anyone with the link
