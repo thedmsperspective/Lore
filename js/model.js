@@ -5,7 +5,17 @@
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3);
 
-const T = (name, fields) => ({ id: uid(), name, fields });
+const T = (name, fields) => ({ id: uid(), name, fields, icon: TYPE_ICONS[name] || '' });
+// Each starting type's own symbol (the DM can change any of them)
+export const TYPE_ICONS = {
+  'Region or Country': '🏰', Settlement: '🏘️', 'Landmark or Building': '🏛️', Geography: '⛰️', Plane: '🌀',
+  Character: '🧑', 'People or Species': '🧝', Culture: '🎭', Language: '🗣️',
+  Deity: '☀️', Religion: '🕯️', 'Faction or Organization': '🛡️', Military: '⚔️', 'Title or Rank': '👑',
+  'Item or Artifact': '💎', Material: '🪨', 'Document or Text': '📜', 'Technology or Magic': '🔮',
+  'Event or Conflict': '🔥', 'Myth or Legend': '🐉', Tradition: '🎉', Note: '📝',
+};
+/** The symbol for an entry: its type's, else its section's */
+export const iconOf = (w, e) => { const t = typeOf(w, e.type); return t?.icon || t?.section?.icon || '✨'; };
 export function defaultSections() {
   return [
     { id: uid(), name: 'Places', icon: '🗺️', types: [T('Region or Country', ['Government', 'Ruler', 'Capital', 'Population']), T('Settlement', ['Size', 'Population', 'Ruler', 'Region']), T('Landmark or Building', ['Location', 'Owner', 'Purpose']), T('Geography', ['Kind', 'Region', 'Climate']), T('Plane', ['Kind', 'How to reach it', 'Ruler'])] },
@@ -89,7 +99,7 @@ export function playerCopy(e) {
   };
 }
 /** The sections and types players need (names and icons only) */
-export const playerSections = w => (w.sections || []).map(s => ({ id: s.id, name: s.name, icon: s.icon || '', types: (s.types || []).map(t => ({ id: t.id, name: t.name })) }));
+export const playerSections = w => (w.sections || []).map(s => ({ id: s.id, name: s.name, icon: s.icon || '', types: (s.types || []).map(t => ({ id: t.id, name: t.name, icon: t.icon || '' })) }));
 
 /** A picture stored in Google Drive, viewable by link */
 export const imgUrl = (img, w = 1600) => (img?.id ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(img.id)}&sz=w${w}` : '');

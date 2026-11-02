@@ -71,7 +71,8 @@ async function sync(interactive) {
   } catch (e) { pill(interactive ? `⚠ ${e.message}` : '● not synced'); if (interactive) toast(e.message); }
   finally { syncing = false; }
 }
-const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? w.sections : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), events: w?.events || [], maps: w?.maps || [], eras: w?.eras || [], calendar: { months: w?.calendar?.months || [] }, settings: { ...(w?.settings || {}) } });
+const withIcons = secs => secs.map(s => ({ ...s, types: (s.types || []).map(t => (t.icon == null && M.TYPE_ICONS[t.name] ? { ...t, icon: M.TYPE_ICONS[t.name] } : t)) }));
+const normalize = w => ({ ...M.newWorld(), ...w, sections: w?.sections?.length ? withIcons(w.sections) : M.defaultSections(), entries: (w?.entries || []).map(e => ({ facts: [], ...e })), events: w?.events || [], maps: w?.maps || [], eras: w?.eras || [], calendar: { months: w?.calendar?.months || [] }, settings: { ...(w?.settings || {}) } });
 
 // Pictures: shrunk on this device, put in a "Lore pictures" folder in the DM's Drive, viewable by anyone with the link
 async function shrink(file, max) {
@@ -186,7 +187,7 @@ function render() {
 }
 
 function row(w, e) {
-  return `<button class="erow" data-go="${e.id}">${e.img?.id ? pic(e.img, 160, 'thumb') : `<span class="thumb ph">${esc(M.sectionOf(w, e)?.icon || '✨')}</span>`}
+  return `<button class="erow" data-go="${e.id}">${e.img?.id ? pic(e.img, 160, 'thumb') : `<span class="thumb ph">${esc(M.iconOf(w, e))}</span>`}
     <span class="et"><b>${esc(e.title || 'Untitled')}</b><span class="mu small">${esc(typeName(w, e.type))}${!reader() && !e.revealed ? ' · <span class="tag hid">Hidden from players</span>' : ''}</span>
     ${e.summary ? `<span class="small sum">${esc(e.summary)}</span>` : ''}</span></button>`;
 }
@@ -219,7 +220,7 @@ function sectionView(app, w) {
   const types = s.types || [], ids = new Set(types.map(t => t.id));
   const es = w.entries.filter(e => ids.has(e.type) && (!ui.type || e.type === ui.type)).sort((a, b) => a.title.localeCompare(b.title));
   app.innerHTML = `<div class="card"><div class="row"><h2 class="grow">${esc(s.icon || '')} ${esc(s.name)}</h2>${reader() ? '' : '<button class="pri" id="newE">+ New entry</button>'}</div>
-    <div class="row chips"><button class="sm" data-t="" aria-pressed="${!ui.type}">All</button>${types.map(t => `<button class="sm" data-t="${t.id}" aria-pressed="${ui.type === t.id}">${esc(t.name)}</button>`).join('')}</div></div>
+    <div class="row chips"><button class="sm" data-t="" aria-pressed="${!ui.type}">All</button>${types.map(t => `<button class="sm" data-t="${t.id}" aria-pressed="${ui.type === t.id}">${t.icon ? `${esc(t.icon)} ` : ''}${esc(t.name)}</button>`).join('')}</div></div>
     <div class="card"><div class="elist">${es.map(e => row(w, e)).join('') || `<p class="mu">${reader() ? 'Nothing here yet.' : 'Nothing here yet.'}</p>`}</div></div>`;
   bindRows(app);
   app.querySelectorAll('[data-t]').forEach(b => { b.onclick = () => { ui.type = b.dataset.t; render(); }; });
@@ -232,7 +233,7 @@ function entryView(app, w) {
   app.innerHTML = `
   <article class="card entry">
     ${e.img?.id ? `<div class="hero">${pic(e.img, 1600)}</div>` : ''}
-    <div class="row"><div class="grow"><h2>${esc(e.title)}</h2><span class="mu">${esc(t?.name || 'Entry')}${t ? ` · ${esc(t.section.name)}` : ''}</span>${M.hasDate(e.date) ? `<div class="when">🕰 ${esc(M.dateText(w, e.date))}${M.hasDate(e.dateEnd) ? ` – ${esc(M.dateText(w, e.dateEnd))}` : ''}</div>` : ''}</div>
+    <div class="row"><div class="grow"><h2>${esc(e.title)}</h2><span class="mu">${esc(M.iconOf(w, e))} ${esc(t?.name || 'Entry')}${t ? ` · ${esc(t.section.name)}` : ''}</span>${M.hasDate(e.date) ? `<div class="when">🕰 ${esc(M.dateText(w, e.date))}${M.hasDate(e.dateEnd) ? ` – ${esc(M.dateText(w, e.dateEnd))}` : ''}</div>` : ''}</div>
       ${reader() ? '' : `<button id="reveal" class="${e.revealed ? 'ok' : ''}" aria-pressed="${!!e.revealed}">${e.revealed ? '👁 Players can see this' : '🔒 Hidden from players'}</button><button id="edit">Edit</button>`}</div>
     ${e.summary ? `<p class="lead">${esc(e.summary)}</p>` : ''}
     ${facts.length ? `<dl class="facts">${facts.map(f => `<dt>${esc(f.k)}${f.hidden ? ' <span title="Only you see this">🔒</span>' : ''}</dt><dd>${M.render(f.v, link)}</dd>`).join('')}</dl>` : ''}
@@ -492,7 +493,7 @@ function settingsView(app) {
   app.innerHTML = `<div class="card"><h2>Your world</h2><label>Name</label><input id="wn" value="${esc(W.name)}"></div>
     <div class="card"><h2>Sections and types</h2><p class="mu small">Rename anything, add your own types and the facts each one keeps. Facts are listed with commas between them.</p>
       ${W.sections.map((s, si) => `<div class="secedit"><div class="row"><input class="icon" data-si="${si}" data-k="icon" value="${esc(s.icon || '')}" aria-label="Icon"><input class="grow" data-si="${si}" data-k="name" value="${esc(s.name)}" aria-label="Section name">${s.types.some(t => used(t.id)) ? '' : `<button class="sm bad" data-delsec="${si}">Remove</button>`}</div>
-        ${s.types.map((t, ti) => `<div class="typeedit"><input data-si="${si}" data-ti="${ti}" data-k="tname" value="${esc(t.name)}" aria-label="Type name"><input data-si="${si}" data-ti="${ti}" data-k="fields" value="${esc((t.fields || []).join(', '))}" placeholder="Facts, with commas" aria-label="Facts"><span class="mu small" title="Entries of this type">${used(t.id) || ''}</span>${used(t.id) ? '<span></span>' : `<button class="sm" data-deltype="${si}.${ti}" aria-label="Remove type">✕</button>`}</div>`).join('')}
+        ${s.types.map((t, ti) => `<div class="typeedit"><input class="icon" data-si="${si}" data-ti="${ti}" data-k="ticon" value="${esc(t.icon || '')}" aria-label="Type icon" placeholder="${esc(s.icon || '')}"><input data-si="${si}" data-ti="${ti}" data-k="tname" value="${esc(t.name)}" aria-label="Type name"><input data-si="${si}" data-ti="${ti}" data-k="fields" value="${esc((t.fields || []).join(', '))}" placeholder="Facts, with commas" aria-label="Facts"><span class="mu small" title="Entries of this type">${used(t.id) || ''}</span>${used(t.id) ? '<span></span>' : `<button class="sm" data-deltype="${si}.${ti}" aria-label="Remove type">✕</button>`}</div>`).join('')}
         <button class="sm" data-addtype="${si}">+ Add a type</button></div>`).join('')}
       <button id="addsec">+ Add a section</button></div>
     <div class="card"><h2>Timeline</h2><p class="mu small">Name your world's eras, oldest first. Years count up within an era, unless you tick "counts down" (like years before a great event).</p>
@@ -512,7 +513,7 @@ function settingsView(app) {
       const s = W.sections[i.dataset.si], k = i.dataset.k;
       if (k === 'icon') s.icon = i.value.trim();
       else if (k === 'name') s.name = i.value.trim() || s.name;
-      else { const t = s.types[i.dataset.ti]; if (k === 'tname') t.name = i.value.trim() || t.name; else t.fields = i.value.split(',').map(x => x.trim()).filter(Boolean); }
+      else { const t = s.types[i.dataset.ti]; if (k === 'tname') t.name = i.value.trim() || t.name; else if (k === 'ticon') t.icon = i.value.trim(); else t.fields = i.value.split(',').map(x => x.trim()).filter(Boolean); }
       save();
     };
   });
