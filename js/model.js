@@ -34,7 +34,7 @@ export const typeOf = (w, id) => allTypes(w).find(t => t.id === id) || null;
 export const sectionOf = (w, e) => typeOf(w, e.type)?.section || (w.sections || []).at(-1) || null;
 
 /* ---------- writing: a few simple marks, links to other entries, and secret blocks ---------- */
-// **bold**, *italic*, # Heading, - list items, [[Entry title]] or [[Entry title|shown text]], and
+// **bold**, *italic*, # Heading, - list items (indent a line to nest it; 1. for numbered), [[Entry title]] or [[Entry title|shown text]], and
 // [secret] ... [/secret] for parts only the DM sees.
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export { esc };
@@ -58,25 +58,45 @@ export function render(text, link, { secrets = true } = {}) {
   }
   return out.join('');
 }
+// How far a line is indented: each tab, or each 4 spaces (2 or more counts), is one step
+const levelOf = l => { let c = 0; for (const ch of /^[\t ]*/.exec(l)[0]) c += ch === '\t' ? 4 : 1; return c ? Math.max(1, Math.round(c / 4)) : 0; };
+const BULLET = /^([-*•]|\d+[.)])\s+/;
 function blocks(text, link) {
-  // line by line: headings stand alone, list items group into a list, other lines group into paragraphs
-  const html = []; let para = [], list = [];
-  const flush = () => {
-    if (para.length) html.push(`<p>${para.map(l => inline(l, link)).join('<br>')}</p>`);
-    if (list.length) html.push(`<ul>${list.map(l => `<li>${inline(l, link)}</li>`).join('')}</ul>`);
-    para = []; list = [];
-  };
+  // line by line: headings stand alone; "- ", "* " and "1. " lines make lists, indented under each other to nest;
+  // other lines group into paragraphs, and an indented one keeps its indent
+  const html = []; let para = null; const stack = [];
+  const flushPara = () => { if (para) html.push(`<p${para.lv ? ` style="padding-left:${para.lv * 1.5}em"` : ''}>${para.lines.map(l => inline(l, link)).join('<br>')}</p>`); para = null; };
+  const closeTo = lv => { while (stack.length && stack[stack.length - 1].level >= lv) html.push(`</li></${stack.pop().tag}>`); };
   for (const raw of String(text).split('\n')) {
-    const l = raw.replace(/\s+$/, '');
-    if (!l.trim()) { flush(); continue; }
-    const h = l.match(/^\s*(#{1,3})\s+(.+)$/);
-    if (h) { flush(); html.push(`<h${h[1].length + 2}>${inline(h[2], link)}</h${h[1].length + 2}>`); continue; }
-    const li = l.match(/^\s*[-*]\s+(.+)$/);
-    if (li) { if (para.length) { const keep = list; list = []; flush(); list = keep; } list.push(li[1]); continue; }
-    if (list.length) flush();
-    para.push(l);
+    const l = raw.replace(/\s+$/, ''), body = l.replace(/^[\t ]+/, ''), lv = levelOf(l);
+    if (!body) { flushPara(); closeTo(0); continue; }
+    const h = body.match(/^(#{1,3})\s+(.+)$/);
+    if (h) { flushPara(); closeTo(0); html.push(`<h${h[1].length + 2}>${inline(h[2], link)}</h${h[1].length + 2}>`); continue; }
+    const b = BULLET.exec(body);
+    if (b) {
+      flushPara();
+      const tag = /\d/.test(b[1]) ? 'ol' : 'ul';
+      closeTo(lv + 1);
+      const top = stack[stack.length - 1];
+      if (top && top.level === lv && top.tag === tag) html.push('</li><li>');
+      else {
+        if (top && top.level === lv) html.push(`</li></${stack.pop().tag}>`);
+        const n = parseInt(b[1], 10);
+        html.push(`<${tag}${tag === 'ol' && n !== 1 ? ` start="${n}"` : ''}><li>`);
+        stack.push({ tag, level: lv });
+      }
+      html.push(inline(body.slice(b[0].length), link));
+      continue;
+    }
+    // a plain line indented under a list item carries on that item
+    const top = stack[stack.length - 1];
+    if (top && lv > top.level) { closeTo(lv); html.push(`<br>${inline(body, link)}`); continue; }
+    closeTo(0);
+    if (para && para.lv !== lv) flushPara();
+    if (!para) para = { lv, lines: [] };
+    para.lines.push(body);
   }
-  flush();
+  flushPara(); closeTo(0);
   return html.join('');
 }
 /** The titles an entry links to */

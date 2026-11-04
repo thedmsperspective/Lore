@@ -10,6 +10,7 @@ const esc = M.esc;
 /* ---------- the suite core (sign-in, table) ---------- */
 let core = null;
 const coreReady = import('/core/suite.js').then(m => { core = m; }).catch(() => {});
+import('/core/text.js').catch(() => {}); // indent buttons and bullet lists in every text box
 const isPlayer = () => core?.tableRole?.() === 'player';
 const amDm = () => core?.tableRole?.() === 'dm' && core.currentTable?.()?.id;
 const tablePass = async () => { let p = core.signedIn(''); if (!p && core.refreshNow) p = await core.refreshNow(); return p?.value || null; };
@@ -502,7 +503,7 @@ function settingsView(app) {
         <button class="sm" data-eramove="${i}" ${i ? '' : 'disabled'} aria-label="Move up">↑</button>${eraUsed(x.id) ? '<span></span>' : `<button class="sm" data-eradel="${i}" aria-label="Remove">✕</button>`}</div>`).join('') || '<p class="mu">No eras yet.</p>'}
       <button id="addEra">+ Add an era</button>
       <h3>Months</h3><p class="mu small">For exact dates. One per line: the name, then the number of days.</p>
-      <textarea id="months" rows="5" placeholder="First Month, 30">${esc((W.calendar?.months || []).map(m => `${m.name}, ${m.length}`).join('\n'))}</textarea>
+      <textarea id="months" rows="5" data-plain placeholder="First Month, 30">${esc((W.calendar?.months || []).map(m => `${m.name}, ${m.length}`).join('\n'))}</textarea>
       <div class="row"><button class="sm" id="snCal">Use my Session Notes calendar</button></div></div>
     <div class="card"><h2>Google Drive</h2><div class="row"><button id="syncNow" class="pri">Sync now</button><span class="mu">${esc(syncMsg)}</span></div>
       <p class="mu small">Your world is kept privately in your Google Drive. Pictures go in a "Lore pictures" folder there, viewable by link, so your players see them without any extra steps.</p></div>
