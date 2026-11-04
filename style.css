@@ -85,3 +85,4 @@ body.preview header{background:#1d2b30}
 .zoom{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
 .zoom button{width:40px;height:40px;padding:0;font-size:20px;background:rgba(31,33,40,.9)}
 .filebtn.pri{background:var(--ac);color:#10161a;border-color:var(--ac);font-weight:600;min-height:40px}
+.ln{display:block}

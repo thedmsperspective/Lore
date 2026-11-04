@@ -63,9 +63,16 @@ const levelOf = l => { let c = 0; for (const ch of /^[\t ]*/.exec(l)[0]) c += ch
 const BULLET = /^([-*•]|\d+[.)])\s+/;
 function blocks(text, link) {
   // line by line: headings stand alone; "- ", "* " and "1. " lines make lists, indented under each other to nest;
-  // other lines group into paragraphs, and an indented one keeps its indent
+  // other lines group into paragraphs, and an indented line steps in
   const html = []; let para = null; const stack = [];
-  const flushPara = () => { if (para) html.push(`<p${para.lv ? ` style="padding-left:${para.lv * 1.5}em"` : ''}>${para.lines.map(l => inline(l, link)).join('<br>')}</p>`); para = null; };
+  // an indented line steps in on its first line only, like a paragraph in a book (the way it looks while you write it)
+  const flushPara = () => {
+    if (!para) return;
+    html.push(para.lines.some(l => l.lv)
+      ? `<p>${para.lines.map(l => `<span class="ln"${l.lv ? ` style="text-indent:${l.lv * 2}em"` : ''}>${inline(l.text, link)}</span>`).join('')}</p>`
+      : `<p>${para.lines.map(l => inline(l.text, link)).join('<br>')}</p>`);
+    para = null;
+  };
   const closeTo = lv => { while (stack.length && stack[stack.length - 1].level >= lv) html.push(`</li></${stack.pop().tag}>`); };
   for (const raw of String(text).split('\n')) {
     const l = raw.replace(/\s+$/, ''), body = l.replace(/^[\t ]+/, ''), lv = levelOf(l);
@@ -92,9 +99,8 @@ function blocks(text, link) {
     const top = stack[stack.length - 1];
     if (top && lv > top.level) { closeTo(lv); html.push(`<br>${inline(body, link)}`); continue; }
     closeTo(0);
-    if (para && para.lv !== lv) flushPara();
-    if (!para) para = { lv, lines: [] };
-    para.lines.push(body);
+    if (!para) para = { lines: [] };
+    para.lines.push({ lv, text: body });
   }
   flushPara(); closeTo(0);
   return html.join('');
