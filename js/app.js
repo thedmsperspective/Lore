@@ -260,7 +260,8 @@ function editView(app) {
   ui.newTitle = ''; ui.newType = '';
   const draw = () => {
     const t = M.typeOf(W, e.type), fields = t?.fields || [];
-    const facts = [...fields.map(k => e.facts.find(f => f.k === k) || { k, v: '', hidden: false }), ...e.facts.filter(f => !fields.includes(f.k))];
+    // Facts keep the order you put them in; any of this type's facts the entry doesn't have yet go at the end
+    const facts = [...e.facts, ...fields.filter(k => !e.facts.some(f => f.k === k)).map(k => ({ k, v: '', hidden: false }))];
     e.facts = facts;
     app.innerHTML = `<div class="card edit"><h2>${was ? 'Edit' : 'New entry'}</h2>
       <label>Title</label><input id="et" value="${esc(e.title)}" placeholder="What is it called?">
@@ -269,7 +270,7 @@ function editView(app) {
       <label>When (puts it on the Timeline; leave the era empty for no date)</label>${dateFields('ed', e.date)}
       <details ${M.hasDate(e.dateEnd) ? 'open' : ''}><summary class="mu small">It lasted a while: add an end date</summary>${dateFields('ee', e.dateEnd)}</details>
       <label>Summary (a line or two)</label><textarea id="es" rows="2" placeholder="The one thing everyone knows about it">${esc(e.summary)}</textarea>
-      <label>Facts</label><div class="factedit">${facts.map((f, i) => `<input class="fk" data-fk="${i}" value="${esc(f.k)}" ${fields.includes(f.k) ? 'readonly' : ''}><input data-fv="${i}" value="${esc(f.v)}"><label class="lock" title="Secret: only you see this fact"><input type="checkbox" data-fh="${i}" ${f.hidden ? 'checked' : ''}> 🔒</label>`).join('')}</div>
+      <label>Facts</label><div class="factedit">${facts.map((f, i) => `<input class="fk" data-fk="${i}" value="${esc(f.k)}" ${fields.includes(f.k) ? 'readonly' : ''}><input data-fv="${i}" value="${esc(f.v)}"><label class="lock" title="Secret: only you see this fact"><input type="checkbox" data-fh="${i}" ${f.hidden ? 'checked' : ''}> 🔒</label><span class="fmove"><button type="button" class="sm" data-fup="${i}" ${i ? '' : 'disabled'} aria-label="Move ${esc(f.k)} up">↑</button><button type="button" class="sm" data-fdn="${i}" ${i < facts.length - 1 ? '' : 'disabled'} aria-label="Move ${esc(f.k)} down">↓</button></span>`).join('')}</div>
       <button class="sm" id="addf">+ Add a fact</button>
       <label>Write about it</label>
       <div class="row tools"><button class="sm" data-w="b"><b>B</b></button><button class="sm" data-w="i"><i>I</i></button><button class="sm" data-w="h">Heading</button><button class="sm" data-w="l">• List</button><button class="sm" data-w="link">🔗 Link an entry</button><button class="sm" data-w="secret">🔒 Secret part</button></div>
@@ -285,6 +286,9 @@ function editView(app) {
       e.date = readDate('ed', app); e.dateEnd = readDate('ee', app);
     };
     $('#ety').onchange = () => { keep(); e.type = $('#ety').value; draw(); };
+    const move = (i, d) => { keep(); const j = i + d; if (j < 0 || j >= e.facts.length) return; [e.facts[i], e.facts[j]] = [e.facts[j], e.facts[i]]; draw(); app.querySelector(`[data-f${d < 0 ? 'up' : 'dn'}="${j}"]`)?.focus(); };
+    app.querySelectorAll('[data-fup]').forEach(b => { b.onclick = () => move(+b.dataset.fup, -1); });
+    app.querySelectorAll('[data-fdn]').forEach(b => { b.onclick = () => move(+b.dataset.fdn, 1); });
     $('#addf').onclick = () => { keep(); const k = prompt('Name of the fact (for example: Founded)'); if (k?.trim()) e.facts.push({ k: k.trim(), v: '', hidden: false }); draw(); };
     $('#ei').onchange = async ev => {
       const f = ev.target.files[0]; if (!f) return; keep();
