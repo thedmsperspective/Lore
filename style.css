@@ -36,7 +36,8 @@ main{padding:12px;max-width:980px;margin:0 auto}
 .thumb{width:56px;height:56px;border-radius:8px;object-fit:cover;flex:0 0 auto;background:var(--p)}
 .thumb.ph{display:grid;place-items:center;font-size:24px}
 .thumb.big{width:120px;height:90px}
-.entry .hero img{width:100%;max-height:420px;object-fit:cover;border-radius:10px;margin-bottom:10px;display:block}
+.entry .hero{text-align:center;margin-bottom:10px}.entry .hero img{display:inline-block;max-width:100%;max-height:300px;width:auto;height:auto;object-fit:contain;border-radius:10px;cursor:zoom-in}
+.picview{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.88);display:grid;place-items:center;padding:16px;cursor:zoom-out}.picview img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
 .entry .lead{font:italic 18px/1.5 Georgia,serif;color:#d8d2c4;margin:10px 0}
 .facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;background:var(--p2);border-radius:10px;padding:10px 14px;margin:10px 0}
 .facts dt{color:var(--ac2);font-size:14px}.facts dd{margin:0}.facts dd p{margin:0}

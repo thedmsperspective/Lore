@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION when publishing an update.
-const VERSION = 'lore-v8';
+const VERSION = 'lore-v9';
 const FILES = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', 'js/app.js', 'js/model.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES).then(() => Promise.all(['/core/suite.js', '/core/text.js'].map(u => c.add(u).catch(() => {}))))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x.startsWith('lore-') && x !== VERSION).map(x => caches.delete(x)))).then(() => self.clients.claim())); });

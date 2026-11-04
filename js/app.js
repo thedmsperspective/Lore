@@ -110,6 +110,15 @@ async function trashPicture(img) {
   if (!img?.id) return;
   try { const t = await getToken(false, core.SCOPES.file); await driveFetch(t, `${API}/files/${img.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) }); } catch { /* it stays in the folder */ }
 }
+// Tap an entry's picture to see it full size; tap again (or Escape) to close
+document.addEventListener('click', ev => {
+  const im = ev.target.closest('.hero img'); if (!im) return;
+  const v = document.createElement('div'); v.className = 'picview'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-label', 'Picture, full size');
+  const big = document.createElement('img'); big.src = im.currentSrc || im.src; big.alt = ''; v.appendChild(big);
+  const close = () => { v.remove(); document.removeEventListener('keydown', esc1); };
+  const esc1 = k => { if (k.key === 'Escape') close(); };
+  v.onclick = close; document.addEventListener('keydown', esc1); document.body.appendChild(v);
+});
 const pic = (img, w, cls = '') => (img?.id ? `<img class="${cls}" src="${M.imgUrl(img, w)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${M.imgUrl2(img)}'">` : '');
 
 /* ---------- the table: players see what's revealed, live ---------- */
@@ -233,7 +242,7 @@ function entryView(app, w) {
   const backs = w.entries.filter(x => x.id !== e.id && [x.body, ...(x.facts || []).map(f => f.v)].some(txt => M.linksIn(txt).includes(e.title.toLowerCase())));
   app.innerHTML = `
   <article class="card entry">
-    ${e.img?.id ? `<div class="hero">${pic(e.img, 1600)}</div>` : ''}
+    ${e.img?.id ? `<div class="hero" title="Tap to see it full size">${pic(e.img, 1600)}</div>` : ''}
     <div class="row"><div class="grow"><h2>${esc(e.title)}</h2><span class="mu">${esc(M.iconOf(w, e))} ${esc(t?.name || 'Entry')}${t ? ` · ${esc(t.section.name)}` : ''}</span>${M.hasDate(e.date) ? `<div class="when">🕰 ${esc(M.dateText(w, e.date))}${M.hasDate(e.dateEnd) ? ` – ${esc(M.dateText(w, e.dateEnd))}` : ''}</div>` : ''}</div>
       ${reader() ? '' : `<button id="reveal" class="${e.revealed ? 'ok' : ''}" aria-pressed="${!!e.revealed}">${e.revealed ? '👁 Players can see this' : '🔒 Hidden from players'}</button><button id="edit">Edit</button>`}</div>
     ${e.summary ? `<p class="lead">${esc(e.summary)}</p>` : ''}
